@@ -121,8 +121,8 @@ public class MainFrame extends javax.swing.JFrame {
     // End of variables declaration//GEN-END:variables
 
     private void Ejemplo() {
-        AnimationManager manageAnimation = new AnimationManager(jLabel1);
-        manageAnimation.addAnimation(-1, 0, 100, 5);
-        manageAnimation.start();
+        new AnimationManager(jLabel1).setRate(10).addMotion(-1, 0, 100).start(); 
+        new AnimationManager(jLabel1).setRate(20).addMotion(1, 1, 100).start(); 
+        new AnimationManager(jLabel1).setRate(20).addMutation(-1, 1, 100).start(); 
     }
 }
