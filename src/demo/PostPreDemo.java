@@ -132,7 +132,7 @@ public class PostPreDemo extends javax.swing.JFrame {
     private javax.swing.JPanel jPanelFondo;
     // End of variables declaration//GEN-END:variables
 
-    private void example() {
+    private void example() {        
         AnimationManager am = new AnimationManager(jLabel1);
         am.setPre(()->{
             jButton1.setEnabled(false);
@@ -141,15 +141,16 @@ public class PostPreDemo extends javax.swing.JFrame {
             jButton1.setEnabled(true);
         });
         am.changeRunMode()
-                .setRate(20)
-                .addMotion(-1, 0, 100)
+            .beginParallel()
                 .setRate(10)
+                .addMotion(-1, 0, 100)
+                .setRate(5)
                 .addMotion(1, 1, 100)
                 .addMutation(-1, 1, 100)
-                .changeRunMode()
+            .changeRunMode()
                 .addMotion(-1, -1, 200)
                 .addMutation(1, 1, 50)
-                .extendReverse(5)
+                .extendReverse(1)
                 .start();
     }
 }

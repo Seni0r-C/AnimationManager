@@ -1,11 +1,15 @@
 package com.AniMng;
 
+import com.AniMng.animation.Animable;
+import com.AniMng.animation.Reversable;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Point;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * AnimationManager es un "administrador de animaciones" que se encarga de
@@ -20,21 +24,25 @@ public class AnimationManager<T extends Component> implements Runnable {
     private T object;
     private List<Animation> anilist;
     private long currentRate;
-    private boolean currentRunMode;
+    private AnimationManager<T> currentParallel;
     private Runnable pre;
     private Runnable post;
+    private int firts;
 
     public AnimationManager() {
         anilist = new ArrayList<>();
-        pre = ()->{};
-        post = ()->{};
+        pre = () -> {
+        };
+        post = () -> {
+        };
         this.currentRate = 1;
+        this.firts = -1;
     }
 
     /**
      *
-     * @param objeto (obligatoriamente que hereden de Component)
-     * (Preferably Objects that extends from Component)
+     * @param objeto (obligatoriamente que hereden de Component) (Preferably
+     * Objects that extends from Component)
      */
     public AnimationManager(T objeto) {
         this();
@@ -45,21 +53,100 @@ public class AnimationManager<T extends Component> implements Runnable {
         return anilist;
     }
 
-    public void setRunModeParallel(boolean runModeParallel) {
-        currentRunMode = runModeParallel;
+    public void setCurrentParallel(AnimationManager<T> currentParallel) {
+        this.currentParallel = currentParallel;
     }
 
-    private interface Animable extends Movible, Reversable {
+    public AnimationManager<T> getCurrentParallel() {
+        return currentParallel;
     }
 
-    private interface Movible {
-
-        void move(Component object);
+    public synchronized AnimationManager<T> beginParallel() {
+        this.firts = anilist.size();
+        return this;
     }
 
-    private interface Reversable {
+    public synchronized AnimationManager<T> closeParallel() {
+        if (this.firts == -1) {
+            return this;
+        }
+        if (this.firts == anilist.size()) {
+            this.firts = -1;
+            return this;
+        }
+        ArrayList<Animation> anis = copyAnimations(this.firts, anilist.size(), anilist);
+        anilist.removeAll(anis);
+        anilist.add(new AnimationParallel(anis).getAnimation());
+        this.firts = -1;
+        return this;
+    }
 
-        void reverse(Component object);
+    private static ArrayList<Animation> copyAnimations(int start, int limit, List<Animation> anilist) {
+        ArrayList<Animation> anis = new ArrayList<>();
+        for (int i = start; i < limit; i++) {
+            anis.add(new Animation(anilist.get(i)));
+        }
+        return anis;
+    }
+
+    public static class AnimationParallel implements Animable {
+
+        private List<Animation> anis;
+        private ArrayList<Animation> reverse;
+        int min, max, tempCount;
+        long reverseRate;
+
+        public AnimationParallel(List<Animation> animations) {
+            this.anis = animations;
+            reverse = copyAnimations(0, anis.size(), anis);
+            Collections.reverse(reverse);
+            Stream<Integer> map = anis.stream().map(Animation::getRep);
+            max = map.max(Comparator.naturalOrder()).get();
+            map = anis.stream().map(Animation::getRep);
+            min = map.min(Comparator.naturalOrder()).get();
+        }
+
+        public Animation getAnimation() {
+            return new Animation(this, max, 0);
+        }
+
+        @Override
+        public void act(Component object, int currentRep) {
+            for (Animation ani : anis) {
+                if (currentRep < ani.getRep()) {
+                    ani.getAnimable().act(object, currentRep);
+                    try {
+                        Thread.sleep(ani.getRate());
+                    } catch (InterruptedException e) {
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void reverse(Component object, int currentRep) {
+            for (Animation ani : reverse) {
+                if (currentRep < ani.getRep()) {
+                    ani.getAnimable().reverse(object, currentRep);
+                    try {
+                        Thread.sleep(ani.getRate());
+                    } catch (Exception e) {
+                    }
+                }
+            }
+        }
+
+        private void setRate(long rate) {
+            reverse.forEach((ani) -> {
+                ani.setRate(rate);
+            });
+        }
+
+        @Override
+        public String toString() {
+            return "Parallel" + anis;
+        }
+
     }
 
     private static class Motion implements Animable {
@@ -71,13 +158,12 @@ public class AnimationManager<T extends Component> implements Runnable {
         }
 
         @Override
-        public void move(Component object) {
+        public void act(Component object, int currentRep) {
             object.setLocation(object.getX() + orientacion.x, object.getY() + orientacion.y);
         }
 
         @Override
-        public void reverse(Component object) {
-
+        public void reverse(Component object, int currentRep) {
             object.setLocation(object.getX() - orientacion.x, object.getY() - orientacion.y);
         }
 
@@ -97,13 +183,18 @@ public class AnimationManager<T extends Component> implements Runnable {
         }
 
         @Override
-        public void move(Component object) {
-            reversable.reverse(object);
+        public void act(Component object, int currentRep) {
+            reversable.reverse(object, currentRep);
         }
 
         @Override
-        public void reverse(Component object) {
-            reversable.move(object);
+        public void reverse(Component object, int currentRep) {
+            reversable.act(object, currentRep);
+        }
+
+        @Override
+        public String toString() {
+            return "Reverse:" + reversable.toString();
         }
 
     }
@@ -117,12 +208,12 @@ public class AnimationManager<T extends Component> implements Runnable {
         }
 
         @Override
-        public void move(Component object) {
+        public void act(Component object, int currentRep) {
             object.setSize(object.getWidth() + dms.width, object.getHeight() + dms.height);
         }
 
         @Override
-        public void reverse(Component object) {
+        public void reverse(Component object, int currentRep) {
             // osea cada uno implementa reverse pero para usarse en Reverse class ;) 
             object.setSize(object.getWidth() - dms.width, object.getHeight() - dms.height);
         }
@@ -136,47 +227,34 @@ public class AnimationManager<T extends Component> implements Runnable {
 
     private static class Animation {
 
-        private static int COUNT;
-        private final int id;
-        private long rate;
-        private int rep;
-        private Animable animable;
-        private boolean parallel;
+        protected static int COUNT;
+        protected final int id;
+        protected long rate;
+        protected int rep;
+        protected Animable animable;
 
-        private Animation(Animable animable, int rep, long rate) {
-            this(animable, rep, rate, false);
+        public Animation() {
+            this.id = 0;
         }
 
-        private Animation(Animable animable, int rep, long rate, boolean parallel) {
+        private Animation(Animable animable) {
+            this(animable, 0, 0);
+        }
+
+        private Animation(Animation ani) {
+            this(ani.animable, ani.rep, ani.rate);
+        }
+
+        private Animation(Animable animable, int rep, long rate) {
             this.rate = rate;
             this.rep = rep;
             this.animable = animable;
-            this.parallel = parallel;
             this.id = COUNT++;
-        }
-
-        private void move(Component object) {
-            try {
-                // hasta aquí sabes que es la wea de la interface Animable no? :v  si, ya pues Reverse también la implementa, pero para usar el método reverse :)
-                for (int i = 0; i < rep; i++) {
-                    animable.move(object);
-                    Thread.sleep(rate);
-                }
-            } catch (Exception e) {
-            }
-        }
-
-        public boolean isRunModeParallel() {
-            return parallel;
-        }
-
-        public void setRunModeParallel(boolean isParallel) {
-            this.parallel = isParallel;
         }
 
         @Override
         public String toString() {
-            return "\nAnimation{" + "id=" + id + ", rate=" + rate + ", rep=" + rep + ", animable=" + animable + ", parallel=" + parallel + '}';
+            return "\nAnimation{" + "id=" + id + ", rate=" + rate + ", rep=" + rep + ", animable=" + animable + '}';
         }
 
         public Animable getAnimable() {
@@ -187,12 +265,43 @@ public class AnimationManager<T extends Component> implements Runnable {
             this.animable = animable;
         }
 
-        @Override
-        public Animation clone() throws CloneNotSupportedException {
-            Animation a = new Animation(animable, rep, rate, parallel);
-            return a;
+        public long getRate() {
+            return rate;
         }
 
+        public void setRate(long rate) {
+            this.rate = rate;
+        }
+
+        public int getRep() {
+            return rep;
+        }
+
+        public void setRep(int rep) {
+            this.rep = rep;
+        }
+
+        public void move(Component object) {
+            try {
+                for (int i = 0; i < rep; i++) {
+                    animable.act(object, i);
+                    Thread.sleep(rate);
+                }
+            } catch (Exception e) {
+            }
+        }
+
+        Animation getReverse() {
+            return new Animation(new Reverse(animable), rep, rate);
+        }
+
+        Animation getReverse(long rate) {
+            if (animable instanceof AnimationParallel) {
+                ((AnimationParallel) animable).setRate(rate);
+                return new Animation(new Reverse(animable), rep, 0);
+            }
+            return new Animation(new Reverse(animable), rep, rate);
+        }
     }
 
     /**
@@ -215,15 +324,34 @@ public class AnimationManager<T extends Component> implements Runnable {
     }
 
     public AnimationManager<T> addMotion(int x, int y, int rep) {
-        anilist.add(new Animation(new Motion(new Point(x, y)), rep, currentRate, currentRunMode));
+        anilist.add(new Animation(new Motion(new Point(x, y)), rep, currentRate));
+        return this;
+    }
+
+    /**
+     * Permite añadir una implementación externa de una animación u otro tipo de
+     * acción que quiera ser ejecutada como si se tratase de una
+     *
+     * @param animable la implementación 
+     * @param rep el número de veces que se ejecutará 
+     * @return este objeto <code>AnimationManager</code>
+     */
+    public AnimationManager<T> addAction(Animable animable, int rep) {
+        anilist.add(new Animation(animable, rep, currentRate));
         return this;
     }
 
     public AnimationManager<T> addMutation(int width, int height, int rep) {
-        anilist.add(new Animation(new Mutation(new Dimension(width, height)), rep, currentRate, currentRunMode));
+        anilist.add(new Animation(new Mutation(new Dimension(width, height)), rep, currentRate));
         return this;
     }
 
+    /**
+     * Asigna el tiempo de espera para cada objeto Animation añadido
+     *
+     * @param rate el tiempo de espera para cada iteración de animación
+     * @return este objeto <code>AnimationManager</code>
+     */
     public AnimationManager<T> setRate(long rate) {
         currentRate = rate;
         return this;
@@ -231,9 +359,11 @@ public class AnimationManager<T extends Component> implements Runnable {
 
     @Override
     public void run() {
+        pre.run();
         anilist.forEach((ani) -> {
             ani.move(object);
         });
+        post.run();
     }
 
     /**
@@ -268,24 +398,21 @@ public class AnimationManager<T extends Component> implements Runnable {
     /**
      * Inicia el conjunto de animaciones respetando los valores de modo de
      * ejecucución asignados para cada animación
-     * @see #changeRunMode() 
-     * @see #startLineal()  
-     * @see #startParallel()   
+     *
+     * @see #changeRunMode()
+     * @see #startLineal()
+     * @see #startParallel()
      */
     public void start() {
         start(() -> {
             pre.run();
             anilist.forEach((ani) -> {
-                if (ani.isRunModeParallel()) {
-                    start(() -> {
-                        ani.move(object);
-                    });
-                } else {
-                    ani.move(object);
-                }
+                System.out.println(ani);
+                ani.move(object);
             });
             post.run();
         });
+
     }
 
     /**
@@ -294,9 +421,9 @@ public class AnimationManager<T extends Component> implements Runnable {
      * {@link #addMotion(int, int, int)}, {@link #addMutation(int, int, int)}, {@link #addAnimation(int, int, int, boolean)}
      * después de su invocación. Existen dos modos: el paralelo y el lineal si
      * changeRunMode está en falso las animaciones son ejecutadas todas en un
-     * único hilo, caso contrario son ejecutadas cada una en un hilo
-     * independiente que a su vez están en otro hilo. Este método está orientado
-     * a la interpolación de modos de ejecución de las animaciones.
+     * único hilo, caso contrario son ejecutadas una seguidas de otras en cada
+     * iteración. Este método está orientado a la interpolación de modos de
+     * ejecución de las animaciones.
      *
      * @see #start()
      * @see #startLineal()
@@ -306,8 +433,10 @@ public class AnimationManager<T extends Component> implements Runnable {
      * @return este objeto <code>AnimationManager</code>
      */
     public AnimationManager<T> changeRunMode() {
-        setRunModeParallel(!currentRunMode);
-        return this;
+        System.out.println("aniSize: " + anilist.size());
+        System.out.println("first: " + this.firts);
+        System.out.println("parallel: " + isRunModeParallel());
+        return isRunModeParallel() ? closeParallel() : beginParallel();
     }
 
     /**
@@ -317,11 +446,13 @@ public class AnimationManager<T extends Component> implements Runnable {
      * (todo en un solo hilo), true si es el modo de ejecución es en paralelo
      */
     public boolean isRunModeParallel() {
-        return currentRunMode;
+        return this.firts != -1 && this.firts <= anilist.size();
     }
 
-    private void start(Runnable r) {
-        new Thread(r).start();
+    private Thread start(Runnable r) {
+        Thread t = new Thread(r);
+        t.start();
+        return t;
     }
 
     public void apply(Component object) {
@@ -345,7 +476,7 @@ public class AnimationManager<T extends Component> implements Runnable {
     public AnimationManager<T> extendReverse() {
         ArrayList<Animation> copy = new ArrayList<>();
         anilist.forEach((ani) -> {
-            copy.add(new Animation(new Reverse(ani.getAnimable()), ani.rep, ani.rate));
+            copy.add(ani.getReverse());
         });
         Collections.reverse(copy);
         copy.forEach((ani) -> {
@@ -365,7 +496,7 @@ public class AnimationManager<T extends Component> implements Runnable {
     public AnimationManager<T> extendReverse(long rate) {
         ArrayList<Animation> copy = new ArrayList<>();
         anilist.forEach((ani) -> {
-            copy.add(new Animation(new Reverse(ani.getAnimable()), ani.rep, rate));
+            copy.add(ani.getReverse(rate));
         });
         Collections.reverse(copy);
         copy.forEach((ani) -> {
@@ -388,7 +519,7 @@ public class AnimationManager<T extends Component> implements Runnable {
         if (index < 0 || index >= anilist.size() || ani == null) {
             return this;
         }
-        anilist.add(new Animation(new Reverse(ani.getAnimable()), ani.rep, rate));
+        anilist.add(ani.getReverse(rate));
         return this;
     }
 
@@ -404,7 +535,7 @@ public class AnimationManager<T extends Component> implements Runnable {
         if (index < 0 || index >= anilist.size() || ani == null) {
             return this;
         }
-        anilist.add(new Animation(new Reverse(ani.getAnimable()), ani.rep, ani.rate));
+        anilist.add(ani.getReverse());
         return this;
     }
 
